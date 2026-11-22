@@ -141,6 +141,7 @@
   <div class="controls">
     <button id="toggle">Start listening</button>
     <div class="size">
+      <button class="icon-btn" id="clearScreen" aria-label="Erase the text on screen">⌫</button>
       <button class="icon-btn" id="smaller" aria-label="Smaller text">A−</button>
       <button class="icon-btn" id="bigger" aria-label="Bigger text">A+</button>
     </div>
@@ -310,7 +311,7 @@
         if (a !== 'unavailable') msg = 'Translation: on this device' + (a === 'available' ? '' : ' (the model downloads the first time)') + '.';
       } catch {}
     }
-    $('#engineInfo').textContent = 'App version 3 (live translation, French). ' + msg + (SR ? '' : ' Speech recognition is not supported in this browser.');
+    $('#engineInfo').textContent = 'App version 4. ' + msg + (SR ? '' : ' Speech recognition is not supported in this browser.');
   }
 
   // ---------- Live (interim) translation ----------
@@ -346,7 +347,7 @@
   // long time. Every CHUNK_WORDS words, lock in the older words as a subtitle
   // line, keeping the last few words open because recognition still revises them.
   const CHUNK_WORDS = 12, KEEP_OPEN = 4;
-  let committedWords = 0;
+  let committedWords = 0, fullInterim = '';
   const words = (t) => t.trim().split(/\s+/).filter(Boolean);
 
   // ---------- Subtitles ----------
@@ -407,6 +408,7 @@
         } else interim += res[0].transcript;
       }
       if (hadFinal) setInterim('');
+      fullInterim = interim;
       let w = words(interim);
       if (w.length - committedWords >= CHUNK_WORDS + KEEP_OPEN) {
         const upto = w.length - KEEP_OPEN;
@@ -528,6 +530,14 @@
     if (listening) { stop(); start(); }
   }));
   $('#toggle').addEventListener('click', () => listening ? stop() : (status(''), start()));
+  // Erase the subtitles on screen (History keeps them).
+  $('#clearScreen').addEventListener('click', () => {
+    $('#lines').innerHTML = '';
+    // Words already heard stay erased even when the phone finishes the sentence.
+    committedWords = listening ? words(fullInterim).length : 0;
+    setInterim('');
+    $('#placeholder').style.display = listening ? 'none' : '';
+  });
   $('#smaller').addEventListener('click', () => { size -= 4; applySize(); });
   $('#bigger').addEventListener('click', () => { size += 4; applySize(); });
   $('#sizeRange').addEventListener('input', (e) => { size = Number(e.target.value); applySize(); });

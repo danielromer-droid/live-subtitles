@@ -29,7 +29,7 @@ The first time you tap **Start listening**, allow microphone access.
 2. Tap **Start listening** and hold the phone near the speaker, TV or person talking.
 3. English subtitles appear while the person is still talking (in light grey) and settle into white when the sentence finishes. The original words show underneath.
 
-Use **A− / A+** (or Settings) to change the subtitle size. **History** keeps what was said on this phone, with buttons to copy it.
+Use **A− / A+** (or Settings) to change the subtitle size, and **⌫** to erase the text on screen. **History** keeps what was said on this phone, with buttons to copy it.
 
 ## Limits to know
 

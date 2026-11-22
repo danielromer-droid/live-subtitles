@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Live Subtitles</title>
+<meta name="description" content="Live English subtitles for speech in German, Spanish, Catalan or Italian.">
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Subtitles">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #181b22;
+    --line: #2a2f3a;
+    --text: #f4f5f7;
+    --muted: #9aa1ad;
+    --interim: #8b919c;
+    --accent: #ffd23f;
+    --accent-ink: #1a1400;
+    --danger: #ff6b6b;
+    --sub-size: 34px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex; flex-direction: column;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    overscroll-behavior: none;
+  }
+  header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 16px; border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 17px; margin: 0; flex: 1; font-weight: 650; letter-spacing: .2px; }
+  .icon-btn {
+    background: none; border: 1px solid var(--line); color: var(--text);
+    border-radius: 10px; height: 38px; min-width: 38px; padding: 0 10px; font-size: 15px; cursor: pointer;
+  }
+  .langs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 12px 16px 0; }
+  .langs button {
+    background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    border-radius: 12px; padding: 10px 4px; font-size: 15px; cursor: pointer;
+  }
+  .langs button .flag { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .langs button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 650; }
+  .langs button[aria-pressed="true"] .flag { color: var(--accent-ink); opacity: .7; }
+  .langs button:disabled { opacity: .5; }
+
+  main { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 12px 16px; gap: 12px; }
+  #stage {
+    flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column;
+    background: #000; border-radius: 16px; padding: 18px; border: 1px solid var(--line);
+  }
+  #stage .spacer { flex: 1; }
+  .line { margin-top: 14px; }
+  .line .en { font-size: var(--sub-size); line-height: 1.22; font-weight: 600; color: var(--text); word-wrap: break-word; }
+  .line .orig { font-size: max(14px, calc(var(--sub-size) * .45)); color: var(--muted); margin-top: 4px; }
+  .line.pending .en { color: var(--muted); font-weight: 500; }
+  .line.old .en { opacity: .55; }
+  .hide-orig .line .orig { display: none; }
+  #interim { font-size: calc(var(--sub-size) * .7); color: var(--interim); font-style: italic; margin-top: 14px; min-height: 1.2em; }
+  #placeholder { color: var(--muted); font-size: 18px; text-align: center; margin: auto 0; }
+
+  #status { font-size: 14px; color: var(--muted); min-height: 20px; text-align: center; }
+  #status.error { color: var(--danger); }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--danger); margin-right: 6px; vertical-align: 1px; animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+
+  .controls { display: flex; gap: 10px; align-items: center; }
+  #toggle {
+    flex: 1; height: 58px; border-radius: 16px; border: 0; font-size: 19px; font-weight: 700;
+    background: var(--accent); color: var(--accent-ink); cursor: pointer;
+  }
+  #toggle.on { background: var(--danger); color: #fff; }
+  .size { display: flex; gap: 6px; }
+  .size .icon-btn { height: 58px; min-width: 52px; border-radius: 16px; font-size: 18px; font-weight: 700; }
+
+  dialog {
+    background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 18px;
+    width: min(560px, calc(100vw - 24px)); max-height: calc(100dvh - 40px); padding: 0;
+  }
+  dialog::backdrop { background: rgba(0,0,0,.6); }
+  .dlg-head { display: flex; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--line); gap: 8px; }
+  .dlg-head h2 { margin: 0; font-size: 18px; flex: 1; }
+  .dlg-body { padding: 16px; overflow-y: auto; max-height: calc(100dvh - 140px); }
+  .field { margin-bottom: 18px; }
+  .field label { display: block; font-weight: 600; margin-bottom: 6px; }
+  .field .hint { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .field input[type=email] {
+    width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font-size: 16px;
+  }
+  .field input[type=range] { width: 100%; }
+  .check { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+  .check input { width: 22px; height: 22px; }
+  #historyList { display: flex; flex-direction: column; gap: 12px; }
+  #historyList .item { border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+  #historyList .item .t { color: var(--muted); font-size: 12px; }
+  #historyList .item .en { font-size: 17px; }
+  #historyList .item .orig { color: var(--muted); font-size: 14px; }
+  .row { display: flex; gap: 8px; margin-bottom: 14px; }
+  .row .icon-btn { flex: 1; height: 44px; }
+  .engine { font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Live Subtitles → English</h1>
+  <button class="icon-btn" id="historyBtn" aria-label="History">History</button>
+  <button class="icon-btn" id="settingsBtn" aria-label="Settings">⚙︎</button>
+</header>
+
+<div class="langs" role="group" aria-label="Language being spoken">
+  <button data-lang="de-DE" data-src="de">Deutsch<span class="flag">German</span></button>
+  <button data-lang="es-ES" data-src="es">Español<span class="flag">Spanish</span></button>
+  <button data-lang="ca-ES" data-src="ca">Català<span class="flag">Catalan</span></button>
+  <button data-lang="it-IT" data-src="it">Italiano<span class="flag">Italian</span></button>
+</div>
+
+<main>
+  <div id="stage" aria-live="polite">
+    <div class="spacer"></div>
+    <div id="placeholder">Pick the language being spoken, then tap <b>Start listening</b>.</div>
+    <div id="lines"></div>
+    <div id="interim"></div>
+  </div>
+  <div id="status"></div>
+  <div class="controls">
+    <button id="toggle">Start listening</button>
+    <div class="size">
+      <button class="icon-btn" id="smaller" aria-label="Smaller text">A−</button>
+      <button class="icon-btn" id="bigger" aria-label="Bigger text">A+</button>
+    </div>
+  </div>
+</main>
+
+<dialog id="settings">
+  <div class="dlg-head"><h2>Settings</h2><button class="icon-btn" data-close>Done</button></div>
+  <div class="dlg-body">
+    <div class="field">
+      <label for="sizeRange">Subtitle size: <span id="sizeVal"></span>px</label>
+      <input type="range" id="sizeRange" min="18" max="72" step="2">
+    </div>
+    <div class="field">
+      <label class="check"><input type="checkbox" id="showOrig"> Show the original words underneath</label>
+    </div>
+    <div class="field">
+      <label for="email">Email for the free translator (optional)</label>
+      <input type="email" id="email" placeholder="you@example.com" autocomplete="email">
+      <div class="hint">MyMemory allows about 5,000 characters a day without an email, and about 50,000 with one. The email is only sent to MyMemory and stays on this phone.</div>
+    </div>
+    <div class="field">
+      <div class="engine" id="engineInfo"></div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="history">
+  <div class="dlg-head"><h2>History</h2><button class="icon-btn" data-close>Done</button></div>
+  <div class="dlg-body">
+    <div class="row">
+      <button class="icon-btn" id="copyEn">Copy English</button>
+      <button class="icon-btn" id="copyBoth">Copy both</button>
+      <button class="icon-btn" id="clearHist">Clear</button>
+    </div>
+    <div id="historyList"></div>
+  </div>
+</dialog>
+
+<script>
+(() => {
+  'use strict';
+  const $ = (s) => document.querySelector(s);
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem('ls.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem('ls.' + k, JSON.stringify(v)); } catch {} }
+  };
+
+  // ---------- State ----------
+  let lang = store.get('lang', 'de-DE');
+  let size = store.get('size', 34);
+  let showOrig = store.get('showOrig', true);
+  let email = store.get('email', '');
+  let history = store.get('history', []);
+  let listening = false;
+  let recognition = null;
+  let wakeLock = null;
+  let restartTimer = null;
+  let lastError = null;
+  const translators = {}; // on-device translators by source language
+  const MAX_LINES_ON_SCREEN = 30;
+  const MAX_HISTORY = 500;
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  // ---------- UI helpers ----------
+  const status = (msg, isError = false) => {
+    const el = $('#status');
+    el.className = isError ? 'error' : '';
+    el.innerHTML = msg;
+  };
+  const applySize = () => {
+    size = Math.max(18, Math.min(72, size));
+    document.documentElement.style.setProperty('--sub-size', size + 'px');
+    $('#sizeRange').value = size; $('#sizeVal').textContent = size;
+    store.set('size', size);
+  };
+  const applyOrig = () => {
+    $('#stage').classList.toggle('hide-orig', !showOrig);
+    $('#showOrig').checked = showOrig;
+    store.set('showOrig', showOrig);
+  };
+  const srcOf = (l) => l.slice(0, 2);
+  const langButtons = [...document.querySelectorAll('.langs button')];
+  const applyLang = () => {
+    langButtons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lang === lang)));
+    store.set('lang', lang);
+    updateEngineInfo();
+  };
+  const scrollDown = () => { const s = $('#stage'); s.scrollTop = s.scrollHeight; };
+
+  // ---------- Translation ----------
+  // Returns a ready on-device translator, or null. Never waits for a model
+  // download: that happens in the background while MyMemory is used.
+  const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+  const pendingCreate = {};
+  async function getOnDeviceTranslator(src) {
+    if (!('Translator' in self)) return null;
+    if (translators[src] !== undefined) return translators[src];
+    if (!pendingCreate[src]) {
+      pendingCreate[src] = (async () => {
+        try {
+          const avail = await withTimeout(Translator.availability({ sourceLanguage: src, targetLanguage: 'en' }), 3000);
+          if (avail === 'unavailable') { translators[src] = null; return; }
+          translators[src] = await Translator.create({ sourceLanguage: src, targetLanguage: 'en' });
+        } catch {
+          // May need a user gesture to download the model; try again on next Start.
+        } finally { delete pendingCreate[src]; }
+      })();
+    }
+    try { await withTimeout(pendingCreate[src], 1500); } catch {}
+    return translators[src] || null;
+  }
+
+  async function translate(text, src) {
+    const t = await getOnDeviceTranslator(src);
+    if (t) {
+      try { return { text: await withTimeout(t.translate(text), 8000), engine: 'device' }; } catch {}
+    }
+    const params = new URLSearchParams({ q: text, langpair: src + '|en' });
+    if (email) params.set('de', email);
+    const res = await fetch('https://api.mymemory.translated.net/get?' + params);
+    if (!res.ok) throw new Error('Translator returned ' + res.status);
+    const data = await res.json();
+    const out = data && data.responseData && data.responseData.translatedText;
+    if (data.quotaFinished || /MYMEMORY WARNING/i.test(out || '')) {
+      throw new Error('Daily translation limit reached. Add an email in Settings to raise it.');
+    }
+    if (data.responseStatus && Number(data.responseStatus) !== 200) throw new Error(out || 'Translation failed');
+    return { text: decodeEntities(out || ''), engine: 'mymemory' };
+  }
+
+  function decodeEntities(s) {
+    const ta = document.createElement('textarea'); ta.innerHTML = s; return ta.value;
+  }
+
+  async function updateEngineInfo() {
+    const src = srcOf(lang);
+    let msg = 'Translation: free MyMemory service (needs internet).';
+    if ('Translator' in self) {
+      try {
+        const a = await withTimeout(Translator.availability({ sourceLanguage: src, targetLanguage: 'en' }), 3000);
+        if (a !== 'unavailable') msg = 'Translation: on this device' + (a === 'available' ? '' : ' (the model downloads the first time)') + '.';
+      } catch {}
+    }
+    $('#engineInfo').textContent = msg + (SR ? '' : ' Speech recognition is not supported in this browser.');
+  }
+
+  // ---------- Subtitles ----------
+  // Lines are translated in parallel but kept in spoken order.
+  function addFinal(original) {
+    original = original.trim();
+    if (!original) return;
+    $('#placeholder').style.display = 'none';
+    const src = srcOf(lang);
+    const el = document.createElement('div');
+    el.className = 'line pending';
+    el.innerHTML = '<div class="en">…</div><div class="orig"></div>';
+    el.querySelector('.orig').textContent = original;
+    $('#lines').appendChild(el);
+    trimLines();
+    scrollDown();
+
+    translate(original, src).then(({ text }) => {
+      el.classList.remove('pending');
+      el.querySelector('.en').textContent = text || original;
+      history.push({ t: Date.now(), lang: src, orig: original, en: text });
+      if (history.length > MAX_HISTORY) history = history.slice(-MAX_HISTORY);
+      store.set('history', history);
+      scrollDown();
+    }).catch(err => {
+      el.classList.remove('pending');
+      el.querySelector('.en').textContent = '[not translated] ' + original;
+      status(err.message || 'Translation failed. Check your connection.', true);
+    });
+  }
+
+  function trimLines() {
+    const lines = $('#lines').children;
+    while (lines.length > MAX_LINES_ON_SCREEN) lines[0].remove();
+    [...lines].forEach((l, i) => l.classList.toggle('old', i < lines.length - 2));
+  }
+
+  // ---------- Speech recognition ----------
+  function buildRecognition() {
+    const r = new SR();
+    r.lang = lang;
+    r.continuous = true;
+    r.interimResults = true;
+    r.maxAlternatives = 1;
+
+    r.onstart = () => { lastError = null; status('<span class="dot"></span>Listening in ' + langName() + '…'); };
+    r.onresult = (e) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const res = e.results[i];
+        if (res.isFinal) addFinal(res[0].transcript);
+        else interim += res[0].transcript;
+      }
+      $('#interim').textContent = interim;
+      if (interim) { $('#placeholder').style.display = 'none'; scrollDown(); }
+    };
+    r.onerror = (e) => {
+      lastError = e.error;
+      if (e.error === 'no-speech' || e.error === 'aborted') return;
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        stop();
+        status('Microphone access was blocked. Allow it for this site in your browser settings, then try again.', true);
+      } else if (e.error === 'language-not-supported') {
+        stop();
+        status(langName() + ' speech recognition is not available on this phone. Turn it on for dictation or voice typing in your keyboard settings.', true);
+      } else if (e.error === 'network') {
+        status('No connection to the speech service. Retrying…', true);
+      } else {
+        status('Speech error: ' + e.error, true);
+      }
+    };
+    r.onend = () => {
+      $('#interim').textContent = '';
+      // Browsers stop after silence or a time limit, so keep restarting while listening.
+      if (listening) {
+        clearTimeout(restartTimer);
+        restartTimer = setTimeout(() => {
+          if (!listening) return;
+          try { recognition.start(); } catch { recognition = buildRecognition(); try { recognition.start(); } catch {} }
+        }, lastError === 'network' ? 1500 : 250);
+      }
+    };
+    return r;
+  }
+
+  const langName = () => ({ de: 'German', es: 'Spanish', ca: 'Catalan', it: 'Italian' })[srcOf(lang)];
+
+  async function start() {
+    if (!SR) {
+      status('This browser can\'t do speech recognition. Use Chrome on Android or Safari on iPhone.', true);
+      return;
+    }
+    if (!window.isSecureContext) {
+      status('The microphone needs HTTPS. Open the app from its https:// address.', true);
+      return;
+    }
+    listening = true;
+    $('#toggle').textContent = 'Stop';
+    $('#toggle').classList.add('on');
+    // Warm up the on-device translator during the user gesture so its model can download.
+    getOnDeviceTranslator(srcOf(lang));
+    recognition = buildRecognition();
+    try { recognition.start(); } catch (e) { status('Could not start: ' + e.message, true); stop(); return; }
+    requestWakeLock();
+  }
+
+  function stop() {
+    listening = false;
+    clearTimeout(restartTimer);
+    $('#toggle').textContent = 'Start listening';
+    $('#toggle').classList.remove('on');
+    $('#interim').textContent = '';
+    if (recognition) { try { recognition.onend = null; recognition.stop(); } catch {} recognition = null; }
+    releaseWakeLock();
+    if (!$('#status').classList.contains('error')) status('');
+  }
+
+  // ---------- Screen wake lock ----------
+  async function requestWakeLock() {
+    if (!('wakeLock' in navigator) || wakeLock) return;
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } catch {}
+  }
+  function releaseWakeLock() { if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; } }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && listening) requestWakeLock();
+  });
+
+  // ---------- History ----------
+  function renderHistory() {
+    const list = $('#historyList');
+    list.innerHTML = '';
+    if (!history.length) { list.innerHTML = '<div class="engine">Nothing yet. Subtitles you see are saved here on this phone.</div>'; return; }
+    [...history].reverse().forEach(h => {
+      const d = document.createElement('div'); d.className = 'item';
+      const time = new Date(h.t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      d.innerHTML = '<div class="t"></div><div class="en"></div><div class="orig"></div>';
+      d.querySelector('.t').textContent = time + ' · ' + h.lang.toUpperCase();
+      d.querySelector('.en').textContent = h.en;
+      d.querySelector('.orig').textContent = h.orig;
+      list.appendChild(d);
+    });
+  }
+  async function copyText(text, btn) {
+    const label = btn.textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta);
+      ta.select(); document.execCommand('copy'); ta.remove();
+    }
+    btn.textContent = 'Copied'; setTimeout(() => btn.textContent = label, 1200);
+  }
+
+  // ---------- Wire up ----------
+  langButtons.forEach(b => b.addEventListener('click', () => {
+    if (b.dataset.lang === lang) return;
+    lang = b.dataset.lang;
+    applyLang();
+    if (listening) { stop(); start(); }
+  }));
+  $('#toggle').addEventListener('click', () => listening ? stop() : (status(''), start()));
+  $('#smaller').addEventListener('click', () => { size -= 4; applySize(); });
+  $('#bigger').addEventListener('click', () => { size += 4; applySize(); });
+  $('#sizeRange').addEventListener('input', (e) => { size = Number(e.target.value); applySize(); });
+  $('#showOrig').addEventListener('change', (e) => { showOrig = e.target.checked; applyOrig(); });
+  $('#email').value = email;
+  $('#email').addEventListener('change', (e) => { email = e.target.value.trim(); store.set('email', email); });
+  $('#settingsBtn').addEventListener('click', () => { updateEngineInfo(); $('#settings').showModal(); });
+  $('#historyBtn').addEventListener('click', () => { renderHistory(); $('#history').showModal(); });
+  document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => b.closest('dialog').close()));
+  document.querySelectorAll('dialog').forEach(d => d.addEventListener('click', (e) => { if (e.target === d) d.close(); }));
+  $('#copyEn').addEventListener('click', (e) => copyText(history.map(h => h.en).join('\n'), e.currentTarget));
+  $('#copyBoth').addEventListener('click', (e) => copyText(history.map(h => h.orig + '\n' + h.en).join('\n\n'), e.currentTarget));
+  $('#clearHist').addEventListener('click', () => { history = []; store.set('history', history); renderHistory(); });
+
+  applySize(); applyOrig(); applyLang();
+  if (!SR) status('This browser can\'t do speech recognition. Use Chrome on Android or Safari on iPhone.', true);
+})();
+</script>
+</body>
+</html>

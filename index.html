@@ -281,33 +281,59 @@
     return out;
   }
 
+  // Free web translators, tried in order. When one says "too many requests"
+  // (or fails), it is skipped for a while, longer each time.
+  class Busy extends Error {}
+  const httpGet = async (url) => {
+    let res;
+    try { res = await withTimeout(fetch(url), 5000); } catch (e) { throw new Busy('network'); }
+    if (res.status === 429 || res.status === 403 || res.status >= 500) throw new Busy('HTTP ' + res.status);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+  };
+  const providers = [
+    { name: 'Google', fn: async (q, sl, tl) => {
+      const d = await httpGet('https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=' + sl + '&tl=' + tl + '&q=' + encodeURIComponent(q));
+      return (d[0] || []).map(seg => seg[0]).join('');
+    } },
+    { name: 'Google (2)', fn: async (q, sl, tl) => {
+      const d = await httpGet('https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=' + sl + '&tl=' + tl + '&q=' + encodeURIComponent(q));
+      const first = Array.isArray(d) ? d[0] : null;
+      return typeof first === 'string' ? first : Array.isArray(first) ? first[0] : '';
+    } },
+    { name: 'MyMemory', fn: (q, sl, tl) => translateMyMemory(q, sl, tl).then(r => r.text) },
+  ].map(p => Object.assign(p, { blockedUntil: 0, backoff: 15000, lastError: '' }));
+  const nextFreeAt = () => Math.min(...providers.map(p => p.blockedUntil));
+  const allBlocked = () => nextFreeAt() > Date.now();
+
   async function translateUncached(text, src, tgt) {
     const t = await getOnDeviceTranslator(src, tgt);
     if (t) {
       try { return { text: await withTimeout(t.translate(text), 8000), engine: 'device' }; } catch {}
     }
-    // Fast, free web translator (no key, no daily limit). Falls back to MyMemory if it fails.
-    try {
-      const u = 'https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=' + src + '&tl=' + tgt + '&q=' + encodeURIComponent(text);
-      const res = await withTimeout(fetch(u), 4000);
-      if (res.ok) {
-        const data = await res.json();
-        const en = (data[0] || []).map(seg => seg[0]).join('');
-        if (en) return { text: en, engine: 'google' };
+    for (const p of providers) {
+      if (Date.now() < p.blockedUntil) continue;
+      try {
+        const out = await p.fn(text, src, tgt);
+        if (!out) throw new Busy('empty answer');
+        p.backoff = 15000; p.lastError = '';
+        return { text: out, engine: p.name };
+      } catch (e) {
+        p.lastError = e.message;
+        p.blockedUntil = Date.now() + p.backoff;
+        p.backoff = Math.min(p.backoff * 2, 5 * 60000);
       }
-    } catch {}
-    return translateMyMemory(text, src, tgt);
+    }
+    throw new Busy('All free translators are busy');
   }
 
   async function translateMyMemory(text, src, tgt) {
     const params = new URLSearchParams({ q: text, langpair: src + '|' + tgt });
     if (email) params.set('de', email);
-    const res = await fetch('https://api.mymemory.translated.net/get?' + params);
-    if (!res.ok) throw new Error('Translator returned ' + res.status);
-    const data = await res.json();
+    const data = await httpGet('https://api.mymemory.translated.net/get?' + params);
     const out = data && data.responseData && data.responseData.translatedText;
     if (data.quotaFinished || /MYMEMORY WARNING/i.test(out || '')) {
-      throw new Error('Daily translation limit reached. Add an email in Settings to raise it.');
+      throw new Busy('daily limit reached');
     }
     if (data.responseStatus && Number(data.responseStatus) !== 200) throw new Error(out || 'Translation failed');
     return { text: decodeEntities(out || ''), engine: 'mymemory' };
@@ -326,15 +352,16 @@
         if (a !== 'unavailable') msg = 'Translation: on this device' + (a === 'available' ? '' : ' (the model downloads the first time)') + '.';
       } catch {}
     }
-    $('#engineInfo').textContent = 'App version 5. ' + msg + (SR ? '' : ' Speech recognition is not supported in this browser.');
+    const errs = providers.filter(p => p.lastError).map(p => p.name + ': ' + p.lastError).join('; ');
+    $('#engineInfo').textContent = 'App version 6. ' + msg + (errs ? ' Last problems: ' + errs + '.' : '') + (SR ? '' : ' Speech recognition is not supported in this browser.');
   }
 
   // ---------- Live (interim) translation ----------
   // Translates the words still being spoken, a few times a second, so English
   // appears before the sentence ends. Only the newest result is shown.
   let interimText = '', interimEn = '', interimSeq = 0, shownSeq = 0, resetSeq = 0;
-  let inFlight = 0, interimTimer = null, lastInterimAt = 0, lastSentText = '';
-  const INTERIM_GAP_MS = 150, MAX_IN_FLIGHT = 2;
+  let finalsPending = 0, inFlight = 0, interimTimer = null, lastInterimAt = 0, lastSentText = '';
+  const INTERIM_GAP_MS = 600, MAX_IN_FLIGHT = 1;
   function setInterim(text) {
     interimText = text;
     $('#interim .orig').textContent = text;
@@ -346,6 +373,8 @@
   function pumpInterim() {
     clearTimeout(interimTimer);
     if (!interimText || interimText === lastSentText || inFlight >= MAX_IN_FLIGHT) return;
+    // Finished sentences go first, and nothing live is sent while translators are resting.
+    if (finalsPending > 0 || allBlocked()) { interimTimer = setTimeout(pumpInterim, 400); return; }
     const wait = INTERIM_GAP_MS - (Date.now() - lastInterimAt);
     if (wait > 0) { interimTimer = setTimeout(pumpInterim, wait); return; }
     const text = interimText, seq = ++interimSeq, src = srcOf(lang);
@@ -381,18 +410,32 @@
     trimLines();
     scrollDown();
 
+    translateLine(el, original, src, tgt, 0);
+  }
+
+  function translateLine(el, original, src, tgt, attempt) {
+    finalsPending++;
     translate(original, src, tgt).then(({ text }) => {
       el.classList.remove('pending');
       el.querySelector('.en').textContent = text || original;
       history.push({ t: Date.now(), lang: src, to: tgt, orig: original, en: text });
       if (history.length > MAX_HISTORY) history = history.slice(-MAX_HISTORY);
       store.set('history', history);
+      if ($('#status').classList.contains('error') && listening) status('<span class="dot"></span>Listening in ' + langName() + '…');
       scrollDown();
     }).catch(err => {
-      el.classList.remove('pending');
-      el.querySelector('.en').textContent = '[not translated] ' + original;
-      status(err.message || 'Translation failed. Check your connection.', true);
-    });
+      if (attempt < 8 && el.isConnected) {
+        // Wait until a translator is free again, then retry this line.
+        const wait = Math.max(2000, nextFreeAt() - Date.now() + 200);
+        status('Translator is busy, retrying in ' + Math.ceil(wait / 1000) + ' s…', true);
+        el.querySelector('.en').textContent = '… ' + original;
+        setTimeout(() => translateLine(el, original, src, tgt, attempt + 1), wait);
+      } else {
+        el.classList.remove('pending');
+        el.querySelector('.en').textContent = '[not translated] ' + original;
+        status('Could not translate. Check your internet connection.', true);
+      }
+    }).finally(() => { finalsPending--; });
   }
 
   function trimLines() {

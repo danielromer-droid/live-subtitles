@@ -67,7 +67,10 @@
   .line.pending .en { color: var(--muted); font-weight: 500; }
   .line.old .en { opacity: .55; }
   .hide-orig .line .orig { display: none; }
-  #interim { font-size: calc(var(--sub-size) * .7); color: var(--interim); font-style: italic; margin-top: 14px; min-height: 1.2em; }
+  #interim { margin-top: 14px; min-height: 1.2em; }
+  #interim .en { font-size: var(--sub-size); line-height: 1.22; font-weight: 600; color: #c9ced6; word-wrap: break-word; }
+  #interim .orig { font-size: max(14px, calc(var(--sub-size) * .45)); color: var(--interim); font-style: italic; margin-top: 4px; }
+  .hide-orig #interim .orig { display: none; }
   #placeholder { color: var(--muted); font-size: 18px; text-align: center; margin: auto 0; }
 
   #status { font-size: 14px; color: var(--muted); min-height: 20px; text-align: center; }
@@ -130,7 +133,7 @@
     <div class="spacer"></div>
     <div id="placeholder">Pick the language being spoken, then tap <b>Start listening</b>.</div>
     <div id="lines"></div>
-    <div id="interim"></div>
+    <div id="interim"><div class="en"></div><div class="orig"></div></div>
   </div>
   <div id="status"></div>
   <div class="controls">
@@ -250,11 +253,35 @@
     return translators[src] || null;
   }
 
+  const cache = new Map();
   async function translate(text, src) {
+    const key = src + '|' + text;
+    if (cache.has(key)) return cache.get(key);
+    const out = await translateUncached(text, src);
+    cache.set(key, out);
+    if (cache.size > 400) cache.delete(cache.keys().next().value);
+    return out;
+  }
+
+  async function translateUncached(text, src) {
     const t = await getOnDeviceTranslator(src);
     if (t) {
       try { return { text: await withTimeout(t.translate(text), 8000), engine: 'device' }; } catch {}
     }
+    // Fast, free web translator (no key, no daily limit). Falls back to MyMemory if it fails.
+    try {
+      const u = 'https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=' + src + '&tl=en&q=' + encodeURIComponent(text);
+      const res = await withTimeout(fetch(u), 4000);
+      if (res.ok) {
+        const data = await res.json();
+        const en = (data[0] || []).map(seg => seg[0]).join('');
+        if (en) return { text: en, engine: 'google' };
+      }
+    } catch {}
+    return translateMyMemory(text, src);
+  }
+
+  async function translateMyMemory(text, src) {
     const params = new URLSearchParams({ q: text, langpair: src + '|en' });
     if (email) params.set('de', email);
     const res = await fetch('https://api.mymemory.translated.net/get?' + params);
@@ -274,7 +301,7 @@
 
   async function updateEngineInfo() {
     const src = srcOf(lang);
-    let msg = 'Translation: free MyMemory service (needs internet).';
+    let msg = 'Translation: free Google web translator, with MyMemory as a backup (needs internet).';
     if ('Translator' in self) {
       try {
         const a = await withTimeout(Translator.availability({ sourceLanguage: src, targetLanguage: 'en' }), 3000);
@@ -282,6 +309,33 @@
       } catch {}
     }
     $('#engineInfo').textContent = msg + (SR ? '' : ' Speech recognition is not supported in this browser.');
+  }
+
+  // ---------- Live (interim) translation ----------
+  // Translates the words still being spoken, a few times a second, so English
+  // appears before the sentence ends. Only the newest result is shown.
+  let interimText = '', interimEn = '', interimBusy = false, interimSeq = 0, interimTimer = null, lastInterimAt = 0;
+  const INTERIM_GAP_MS = 350;
+  function setInterim(text) {
+    interimText = text;
+    $('#interim .orig').textContent = text;
+    if (!text) { interimEn = ''; $('#interim .en').textContent = ''; interimSeq++; return; }
+    $('#placeholder').style.display = 'none';
+    pumpInterim();
+    scrollDown();
+  }
+  function pumpInterim() {
+    if (interimBusy || !interimText) return;
+    const wait = INTERIM_GAP_MS - (Date.now() - lastInterimAt);
+    if (wait > 0) { clearTimeout(interimTimer); interimTimer = setTimeout(pumpInterim, wait); return; }
+    const text = interimText, seq = ++interimSeq, src = srcOf(lang);
+    interimBusy = true; lastInterimAt = Date.now();
+    translate(text, src).then(({ text: en }) => {
+      if (seq === interimSeq && interimText) { interimEn = en; $('#interim .en').textContent = en; scrollDown(); }
+    }).catch(() => {}).finally(() => {
+      interimBusy = false;
+      if (interimText && interimText !== text) pumpInterim();
+    });
   }
 
   // ---------- Subtitles ----------
@@ -293,7 +347,8 @@
     const src = srcOf(lang);
     const el = document.createElement('div');
     el.className = 'line pending';
-    el.innerHTML = '<div class="en">…</div><div class="orig"></div>';
+    el.innerHTML = '<div class="en"></div><div class="orig"></div>';
+    el.querySelector('.en').textContent = interimEn || '…';
     el.querySelector('.orig').textContent = original;
     $('#lines').appendChild(el);
     trimLines();
@@ -329,14 +384,14 @@
 
     r.onstart = () => { lastError = null; status('<span class="dot"></span>Listening in ' + langName() + '…'); };
     r.onresult = (e) => {
-      let interim = '';
+      let interim = '', hadFinal = false;
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const res = e.results[i];
-        if (res.isFinal) addFinal(res[0].transcript);
+        if (res.isFinal) { addFinal(res[0].transcript); hadFinal = true; }
         else interim += res[0].transcript;
       }
-      $('#interim').textContent = interim;
-      if (interim) { $('#placeholder').style.display = 'none'; scrollDown(); }
+      if (hadFinal) setInterim('');
+      setInterim(interim.trim());
     };
     r.onerror = (e) => {
       lastError = e.error;
@@ -354,7 +409,9 @@
       }
     };
     r.onend = () => {
-      $('#interim').textContent = '';
+      // Some phones stop without finishing the last sentence: keep it.
+      if (interimText) addFinal(interimText);
+      setInterim('');
       // Browsers stop after silence or a time limit, so keep restarting while listening.
       if (listening) {
         clearTimeout(restartTimer);
@@ -393,7 +450,7 @@
     clearTimeout(restartTimer);
     $('#toggle').textContent = 'Start listening';
     $('#toggle').classList.remove('on');
-    $('#interim').textContent = '';
+    setInterim('');
     if (recognition) { try { recognition.onend = null; recognition.stop(); } catch {} recognition = null; }
     releaseWakeLock();
     if (!$('#status').classList.contains('error')) status('');

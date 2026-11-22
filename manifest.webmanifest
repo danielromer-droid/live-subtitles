@@ -1,7 +1,7 @@
 {
-  "name": "Live Subtitles → English",
+  "name": "Live Subtitles",
   "short_name": "Subtitles",
-  "description": "Live English subtitles for speech in German, Spanish, Catalan, Italian or French.",
+  "description": "Live translated subtitles between English, German, Spanish, Catalan, Italian and French.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

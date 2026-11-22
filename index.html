@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Live Subtitles</title>
-<meta name="description" content="Live English subtitles for speech in German, Spanish, Catalan, Italian or French.">
+<meta name="description" content="Live translated subtitles between English, German, Spanish, Catalan, Italian and French.">
 <meta name="theme-color" content="#0f1115">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -46,15 +46,16 @@
     background: none; border: 1px solid var(--line); color: var(--text);
     border-radius: 10px; height: 38px; min-width: 38px; padding: 0 10px; font-size: 15px; cursor: pointer;
   }
-  .langs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; padding: 12px 16px 0; }
-  .langs button {
-    background: var(--panel); color: var(--text); border: 1px solid var(--line);
-    border-radius: 12px; padding: 10px 2px; font-size: 14px; cursor: pointer;
+  .langs { display: flex; align-items: center; gap: 8px; padding: 12px 16px 0; }
+  .pick { flex: 1; min-width: 0; position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 6px 10px 7px; }
+  .pick span { display: block; font-size: 12px; color: var(--muted); }
+  .pick select {
+    -webkit-appearance: none; appearance: none; width: 100%; background: none; border: 0; padding: 0;
+    color: var(--accent); font-size: 17px; font-weight: 650; font-family: inherit; cursor: pointer;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 16px;
   }
-  .langs button .flag { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
-  .langs button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 650; }
-  .langs button[aria-pressed="true"] .flag { color: var(--accent-ink); opacity: .7; }
-  .langs button:disabled { opacity: .5; }
+  .pick::after { content: "⌄"; position: absolute; right: 10px; bottom: 9px; color: var(--muted); pointer-events: none; }
+  #swap { height: 48px; min-width: 48px; border-radius: 12px; font-size: 20px; }
 
   main { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 12px 16px; gap: 12px; }
   #stage {
@@ -117,23 +118,21 @@
 </head>
 <body>
 <header>
-  <h1>Live Subtitles → English</h1>
+  <h1>Live Subtitles</h1>
   <button class="icon-btn" id="historyBtn" aria-label="History">History</button>
   <button class="icon-btn" id="settingsBtn" aria-label="Settings">⚙︎</button>
 </header>
 
-<div class="langs" role="group" aria-label="Language being spoken">
-  <button data-lang="de-DE" data-src="de">Deutsch<span class="flag">German</span></button>
-  <button data-lang="es-ES" data-src="es">Español<span class="flag">Spanish</span></button>
-  <button data-lang="ca-ES" data-src="ca">Català<span class="flag">Catalan</span></button>
-  <button data-lang="it-IT" data-src="it">Italiano<span class="flag">Italian</span></button>
-  <button data-lang="fr-FR" data-src="fr">Français<span class="flag">French</span></button>
+<div class="langs">
+  <label class="pick"><span>From (spoken)</span><select id="fromSel" aria-label="Language being spoken"></select></label>
+  <button class="icon-btn" id="swap" aria-label="Swap languages">⇄</button>
+  <label class="pick"><span>To (subtitles)</span><select id="toSel" aria-label="Subtitle language"></select></label>
 </div>
 
 <main>
   <div id="stage" aria-live="polite">
     <div class="spacer"></div>
-    <div id="placeholder">Pick the language being spoken, then tap <b>Start listening</b>.</div>
+    <div id="placeholder">Pick the language being spoken and the language you want, then tap <b>Start listening</b>.</div>
     <div id="lines"></div>
     <div id="interim"><div class="en"></div><div class="orig"></div></div>
   </div>
@@ -173,7 +172,7 @@
   <div class="dlg-head"><h2>History</h2><button class="icon-btn" data-close>Done</button></div>
   <div class="dlg-body">
     <div class="row">
-      <button class="icon-btn" id="copyEn">Copy English</button>
+      <button class="icon-btn" id="copyEn">Copy translation</button>
       <button class="icon-btn" id="copyBoth">Copy both</button>
       <button class="icon-btn" id="clearHist">Clear</button>
     </div>
@@ -191,7 +190,19 @@
   };
 
   // ---------- State ----------
-  let lang = store.get('lang', 'de-DE');
+  const LANGS = [
+    { code: 'en', rec: 'en-US', name: 'English', native: 'English' },
+    { code: 'fr', rec: 'fr-FR', name: 'French', native: 'Français' },
+    { code: 'de', rec: 'de-DE', name: 'German', native: 'Deutsch' },
+    { code: 'es', rec: 'es-ES', name: 'Spanish', native: 'Español' },
+    { code: 'ca', rec: 'ca-ES', name: 'Catalan', native: 'Català' },
+    { code: 'it', rec: 'it-IT', name: 'Italian', native: 'Italiano' },
+  ];
+  const recOf = (code) => LANGS.find(l => l.code === code).rec;
+  let lang = store.get('lang', 'de-DE');           // speech recognition language
+  if (!LANGS.some(l => l.rec === lang)) lang = 'de-DE';
+  let target = store.get('target', 'en');           // subtitle language
+  if (!LANGS.some(l => l.code === target)) target = 'en';
   let size = store.get('size', 34);
   let showOrig = store.get('showOrig', true);
   let email = store.get('email', '');
@@ -225,10 +236,12 @@
     store.set('showOrig', showOrig);
   };
   const srcOf = (l) => l.slice(0, 2);
-  const langButtons = [...document.querySelectorAll('.langs button')];
+  const fill = (sel) => { sel.innerHTML = LANGS.map(l => '<option value="' + l.code + '">' + l.native + '</option>').join(''); };
+  fill($('#fromSel')); fill($('#toSel'));
   const applyLang = () => {
-    langButtons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lang === lang)));
-    store.set('lang', lang);
+    $('#fromSel').value = srcOf(lang);
+    $('#toSel').value = target;
+    store.set('lang', lang); store.set('target', target);
     updateEngineInfo();
   };
   const scrollDown = () => { const s = $('#stage'); s.scrollTop = s.scrollHeight; };
@@ -238,42 +251,44 @@
   // download: that happens in the background while MyMemory is used.
   const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
   const pendingCreate = {};
-  async function getOnDeviceTranslator(src) {
+  async function getOnDeviceTranslator(src, tgt) {
     if (!('Translator' in self)) return null;
-    if (translators[src] !== undefined) return translators[src];
-    if (!pendingCreate[src]) {
-      pendingCreate[src] = (async () => {
+    const k = src + '>' + tgt;
+    if (translators[k] !== undefined) return translators[k];
+    if (!pendingCreate[k]) {
+      pendingCreate[k] = (async () => {
         try {
-          const avail = await withTimeout(Translator.availability({ sourceLanguage: src, targetLanguage: 'en' }), 3000);
-          if (avail === 'unavailable') { translators[src] = null; return; }
-          translators[src] = await Translator.create({ sourceLanguage: src, targetLanguage: 'en' });
+          const avail = await withTimeout(Translator.availability({ sourceLanguage: src, targetLanguage: tgt }), 3000);
+          if (avail === 'unavailable') { translators[k] = null; return; }
+          translators[k] = await Translator.create({ sourceLanguage: src, targetLanguage: tgt });
         } catch {
           // May need a user gesture to download the model; try again on next Start.
-        } finally { delete pendingCreate[src]; }
+        } finally { delete pendingCreate[k]; }
       })();
     }
-    try { await withTimeout(pendingCreate[src], 1500); } catch {}
-    return translators[src] || null;
+    try { await withTimeout(pendingCreate[k], 1500); } catch {}
+    return translators[k] || null;
   }
 
   const cache = new Map();
-  async function translate(text, src) {
-    const key = src + '|' + text;
+  async function translate(text, src, tgt = target) {
+    if (src === tgt) return { text, engine: 'none' };
+    const key = src + '>' + tgt + '|' + text;
     if (cache.has(key)) return cache.get(key);
-    const out = await translateUncached(text, src);
+    const out = await translateUncached(text, src, tgt);
     cache.set(key, out);
     if (cache.size > 400) cache.delete(cache.keys().next().value);
     return out;
   }
 
-  async function translateUncached(text, src) {
-    const t = await getOnDeviceTranslator(src);
+  async function translateUncached(text, src, tgt) {
+    const t = await getOnDeviceTranslator(src, tgt);
     if (t) {
       try { return { text: await withTimeout(t.translate(text), 8000), engine: 'device' }; } catch {}
     }
     // Fast, free web translator (no key, no daily limit). Falls back to MyMemory if it fails.
     try {
-      const u = 'https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=' + src + '&tl=en&q=' + encodeURIComponent(text);
+      const u = 'https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=' + src + '&tl=' + tgt + '&q=' + encodeURIComponent(text);
       const res = await withTimeout(fetch(u), 4000);
       if (res.ok) {
         const data = await res.json();
@@ -281,11 +296,11 @@
         if (en) return { text: en, engine: 'google' };
       }
     } catch {}
-    return translateMyMemory(text, src);
+    return translateMyMemory(text, src, tgt);
   }
 
-  async function translateMyMemory(text, src) {
-    const params = new URLSearchParams({ q: text, langpair: src + '|en' });
+  async function translateMyMemory(text, src, tgt) {
+    const params = new URLSearchParams({ q: text, langpair: src + '|' + tgt });
     if (email) params.set('de', email);
     const res = await fetch('https://api.mymemory.translated.net/get?' + params);
     if (!res.ok) throw new Error('Translator returned ' + res.status);
@@ -307,11 +322,11 @@
     let msg = 'Translation: free Google web translator, with MyMemory as a backup (needs internet).';
     if ('Translator' in self) {
       try {
-        const a = await withTimeout(Translator.availability({ sourceLanguage: src, targetLanguage: 'en' }), 3000);
+        const a = await withTimeout(Translator.availability({ sourceLanguage: src, targetLanguage: target }), 3000);
         if (a !== 'unavailable') msg = 'Translation: on this device' + (a === 'available' ? '' : ' (the model downloads the first time)') + '.';
       } catch {}
     }
-    $('#engineInfo').textContent = 'App version 4. ' + msg + (SR ? '' : ' Speech recognition is not supported in this browser.');
+    $('#engineInfo').textContent = 'App version 5. ' + msg + (SR ? '' : ' Speech recognition is not supported in this browser.');
   }
 
   // ---------- Live (interim) translation ----------
@@ -356,7 +371,7 @@
     original = original.trim();
     if (!original) return;
     $('#placeholder').style.display = 'none';
-    const src = srcOf(lang);
+    const src = srcOf(lang), tgt = target;
     const el = document.createElement('div');
     el.className = 'line pending';
     el.innerHTML = '<div class="en"></div><div class="orig"></div>';
@@ -366,10 +381,10 @@
     trimLines();
     scrollDown();
 
-    translate(original, src).then(({ text }) => {
+    translate(original, src, tgt).then(({ text }) => {
       el.classList.remove('pending');
       el.querySelector('.en').textContent = text || original;
-      history.push({ t: Date.now(), lang: src, orig: original, en: text });
+      history.push({ t: Date.now(), lang: src, to: tgt, orig: original, en: text });
       if (history.length > MAX_HISTORY) history = history.slice(-MAX_HISTORY);
       store.set('history', history);
       scrollDown();
@@ -450,7 +465,7 @@
     return r;
   }
 
-  const langName = () => ({ de: 'German', es: 'Spanish', ca: 'Catalan', it: 'Italian', fr: 'French' })[srcOf(lang)];
+  const langName = () => LANGS.find(l => l.code === srcOf(lang)).name;
 
   async function start() {
     if (!SR) {
@@ -465,7 +480,7 @@
     $('#toggle').textContent = 'Stop';
     $('#toggle').classList.add('on');
     // Warm up the on-device translator during the user gesture so its model can download.
-    getOnDeviceTranslator(srcOf(lang));
+    if (srcOf(lang) !== target) getOnDeviceTranslator(srcOf(lang), target);
     recognition = buildRecognition();
     try { recognition.start(); } catch (e) { status('Could not start: ' + e.message, true); stop(); return; }
     requestWakeLock();
@@ -505,7 +520,7 @@
       const d = document.createElement('div'); d.className = 'item';
       const time = new Date(h.t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
       d.innerHTML = '<div class="t"></div><div class="en"></div><div class="orig"></div>';
-      d.querySelector('.t').textContent = time + ' · ' + h.lang.toUpperCase();
+      d.querySelector('.t').textContent = time + ' · ' + h.lang.toUpperCase() + ' → ' + (h.to || 'en').toUpperCase();
       d.querySelector('.en').textContent = h.en;
       d.querySelector('.orig').textContent = h.orig;
       list.appendChild(d);
@@ -523,12 +538,16 @@
   }
 
   // ---------- Wire up ----------
-  langButtons.forEach(b => b.addEventListener('click', () => {
-    if (b.dataset.lang === lang) return;
-    lang = b.dataset.lang;
+  const changeLangs = (from, to) => {
+    const restart = listening && recOf(from) !== lang;
+    lang = recOf(from); target = to;
     applyLang();
-    if (listening) { stop(); start(); }
-  }));
+    setInterim(''); // the open line was translated for the old pair
+    if (restart) { stop(); start(); }
+  };
+  $('#fromSel').addEventListener('change', (e) => changeLangs(e.target.value, target));
+  $('#toSel').addEventListener('change', (e) => changeLangs(srcOf(lang), e.target.value));
+  $('#swap').addEventListener('click', () => changeLangs(target, srcOf(lang)));
   $('#toggle').addEventListener('click', () => listening ? stop() : (status(''), start()));
   // Erase the subtitles on screen (History keeps them).
   $('#clearScreen').addEventListener('click', () => {

@@ -1,6 +1,6 @@
-# Live Subtitles → English
+# Live Subtitles
 
-A phone web app that listens through the microphone and shows live English subtitles for speech in German, Spanish, Catalan, Italian or French.
+A phone web app that listens through the microphone and shows live translated subtitles. Pick the language being spoken and the language you want to read, in any direction between English, French, German, Spanish, Catalan and Italian.
 
 - Works on Android (Chrome) and iPhone (Safari)
 - Add it to your home screen and it opens like a normal app
@@ -25,9 +25,9 @@ The first time you tap **Start listening**, allow microphone access.
 
 ## Using it
 
-1. Tap the language being spoken.
+1. Under **From**, pick the language being spoken. Under **To**, pick the language you want the subtitles in. The ⇄ button swaps them.
 2. Tap **Start listening** and hold the phone near the speaker, TV or person talking.
-3. English subtitles appear while the person is still talking (in light grey) and settle into white when the sentence finishes. The original words show underneath.
+3. Subtitles appear while the person is still talking (in light grey) and settle into white when the sentence finishes. The original words show underneath.
 
 Use **A− / A+** (or Settings) to change the subtitle size, and **⌫** to erase the text on screen. **History** keeps what was said on this phone, with buttons to copy it.
 
@@ -36,5 +36,5 @@ Use **A− / A+** (or Settings) to change the subtitle size, and **⌫** to eras
 - It listens through the microphone. A web page can't capture sound from other apps the way Earwig does on iPhone. A video playing out loud on the same phone or on a nearby TV or laptop works fine. Headphones won't work, because the microphone can't hear them.
 - It needs an internet connection. Most phones send the audio to Google (Android) or Apple (iPhone) to recognise the speech.
 - Translation: the app uses Google's free web translator, which has no key and no daily limit but is not an official service and could stop working one day. If it fails, the app switches to MyMemory, which allows about 5,000 characters a day (about 50,000 if you add an email address in Settings). In desktop Chrome, translation runs on the device.
-- Speed: the speech recognition itself takes a moment to hear words, so the English trails the speaker by roughly half a second to a second.
+- Speed: the speech recognition itself takes a moment to hear words, so the subtitles trail the speaker by roughly half a second to a second.
 - Catalan recognition depends on the phone. If it's missing, check that Catalan is enabled for dictation or voice typing in the phone's keyboard settings.

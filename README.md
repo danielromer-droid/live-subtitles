@@ -1,6 +1,6 @@
 # Live Subtitles → English
 
-A phone web app that listens through the microphone and shows live English subtitles for speech in German, Spanish, Catalan or Italian.
+A phone web app that listens through the microphone and shows live English subtitles for speech in German, Spanish, Catalan, Italian or French.
 
 - Works on Android (Chrome) and iPhone (Safari)
 - Add it to your home screen and it opens like a normal app

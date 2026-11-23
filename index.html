@@ -114,6 +114,17 @@
   .row { display: flex; gap: 8px; margin-bottom: 14px; }
   .row .icon-btn { flex: 1; height: 44px; }
   .engine { font-size: 13px; color: var(--muted); }
+  .seg { display: flex; gap: 6px; }
+  .seg .icon-btn { flex: 1; height: 44px; }
+  .seg .icon-btn.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
+  .meter { height: 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; overflow: hidden; margin-top: 10px; }
+  .meter i { display: block; height: 100%; width: 0; background: #4cd07d; transition: width .08s linear; }
+  .meter i.low { background: var(--danger); }
+  .meter i.high { background: var(--accent); }
+  #liveMeter { height: 6px; margin: -6px auto 0; width: 60%; border: 0; }
+  .tips { margin: 6px 0 0; padding-left: 18px; color: var(--muted); font-size: 14px; }
+  .tips li { margin-bottom: 6px; }
+  .wide { width: 100%; height: 44px; }
 </style>
 </head>
 <body>
@@ -137,6 +148,7 @@
     <div id="interim"><div class="en"></div><div class="orig"></div></div>
   </div>
   <div id="status"></div>
+  <div class="meter" id="liveMeter" hidden><i></i></div>
   <div class="controls">
     <button id="toggle">Start listening</button>
     <div class="size">
@@ -156,6 +168,34 @@
     </div>
     <div class="field">
       <label class="check"><input type="checkbox" id="showOrig"> Show the original words underneath</label>
+    </div>
+    <div class="field">
+      <label>What are you listening to?</label>
+      <div class="seg" id="modeSeg">
+        <button class="icon-btn" data-mode="person">A person near me</button>
+        <button class="icon-btn" data-mode="tv">Radio or TV</button>
+      </div>
+      <div class="hint" id="modeHint"></div>
+    </div>
+    <div class="field" id="boostField">
+      <label for="boostRange">Microphone boost: <span id="boostVal"></span>×</label>
+      <input type="range" id="boostRange" min="1" max="6" step="0.5">
+      <div class="hint" id="boostHint"></div>
+    </div>
+    <div class="field">
+      <button class="icon-btn wide" id="micTest">Test the microphone</button>
+      <div class="meter" id="testMeter" hidden><i></i></div>
+      <div class="hint" id="testHint">Play the radio or TV and watch the bar. Move the phone until it stays green while people speak.</div>
+    </div>
+    <div class="field" id="tvTips">
+      <label>Tips for radio and TV</label>
+      <ul class="tips">
+        <li>Put the phone close to the speaker, about an arm's length away. The microphone is at the bottom of the phone, so point the bottom at the sound.</li>
+        <li>Turn the volume up a little. Clear voices work much better than voices over loud music.</li>
+        <li>If your TV or soundbar has a "clear voice" or "dialogue" setting, turn it on.</li>
+        <li>Keep people near the phone quiet. The phone listens to the loudest voice in the room.</li>
+        <li>On iPhone, if a "Mic Mode" button shows in Control Center while the app listens, pick "Wide Spectrum".</li>
+      </ul>
     </div>
     <div class="field">
       <label for="email">Email for the free translator (optional)</label>
@@ -207,6 +247,12 @@
   let showOrig = store.get('showOrig', true);
   let email = store.get('email', '');
   let history = store.get('history', []);
+  let mode = store.get('mode', 'person');          // 'person' or 'tv' (radio or TV in the room)
+  if (mode !== 'tv') mode = 'person';
+  let boost = store.get('boost', 3);
+  let audio = null;      // our own microphone pipeline while listening with a boost
+  let testAudio = null;  // microphone pipeline for the Settings test
+  let gotResult = false;
   let listening = false;
   let recognition = null;
   let wakeLock = null;
@@ -353,7 +399,7 @@
       } catch {}
     }
     const errs = providers.filter(p => p.lastError).map(p => p.name + ': ' + p.lastError).join('; ');
-    $('#engineInfo').textContent = 'App version 6. ' + msg + (errs ? ' Last problems: ' + errs + '.' : '') + (SR ? '' : ' Speech recognition is not supported in this browser.');
+    $('#engineInfo').textContent = 'App version 7. ' + msg + (errs ? ' Last problems: ' + errs + '.' : '') + (SR ? '' : ' Speech recognition is not supported in this browser.');
   }
 
   // ---------- Live (interim) translation ----------
@@ -444,6 +490,117 @@
     [...lines].forEach((l, i) => l.classList.toggle('old', i < lines.length - 2));
   }
 
+  // ---------- Microphone sensitivity ----------
+  // Speech recognition normally opens the microphone itself, and a web page can't
+  // change how loud that is. Newer desktop Chrome lets a page hand it its own
+  // audio instead, so there we can switch off the voice filters and boost the sound.
+  // Phones (iPhone Safari, Android Chrome) don't allow this yet.
+  const boostSupport = () => {
+    const b = store.get('boostSupport', null);
+    return b && b.ua === navigator.userAgent ? b.ok : null; // null = not checked yet
+  };
+  const setBoostSupport = (ok) => { store.set('boostSupport', { ua: navigator.userAgent, ok }); applyMode(); };
+
+  async function openMic(forRecognition) {
+    const constraints = mode === 'tv'
+      ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+      : true;
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AC();
+    if (ctx.state === 'suspended') { try { await ctx.resume(); } catch {} }
+    const src = ctx.createMediaStreamSource(stream);
+    const gain = ctx.createGain();
+    const useBoost = mode === 'tv' && (forRecognition || boostSupport() === true);
+    gain.gain.value = useBoost ? boost : 1;
+    // The compressor keeps boosted sound from distorting when it gets loud.
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -18; comp.knee.value = 12; comp.ratio.value = 8;
+    comp.attack.value = 0.003; comp.release.value = 0.25;
+    const analyser = ctx.createAnalyser(); analyser.fftSize = 1024;
+    src.connect(gain); gain.connect(comp); comp.connect(analyser);
+    const a = { ctx, stream, gain, comp, analyser, useBoost, track: null, alive: true, raf: 0 };
+    if (forRecognition) a.track = newTrack(a);
+    return a;
+  }
+  function newTrack(a) {
+    const dest = a.ctx.createMediaStreamDestination();
+    a.comp.connect(dest);
+    return dest.stream.getAudioTracks()[0];
+  }
+  function liveTrack(a) {
+    if (!a.track || a.track.readyState !== 'live') a.track = newTrack(a);
+    return a.track;
+  }
+  function closeMic(a) {
+    if (!a) return;
+    a.alive = false; cancelAnimationFrame(a.raf);
+    a.stream.getTracks().forEach(t => t.stop());
+    if (a.track) a.track.stop();
+    a.ctx.close().catch(() => {});
+  }
+  // Shows the sound level. Between 0 and 100: under 25 is too quiet for speech.
+  function runMeter(a, meterEl, onLevel) {
+    const bar = meterEl.querySelector('i');
+    const buf = new Float32Array(a.analyser.fftSize);
+    let level = 0, lastReport = 0;
+    meterEl.hidden = false;
+    const tick = (now) => {
+      if (!a.alive) { meterEl.hidden = true; bar.style.width = '0'; return; }
+      a.analyser.getFloatTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+      const db = 20 * Math.log10(Math.sqrt(sum / buf.length) + 1e-8);
+      const pct = Math.max(0, Math.min(100, (db + 60) / 60 * 100));
+      level = Math.max(pct, level - 0.6); // hold peaks so gaps between words don't flicker
+      bar.style.width = level + '%';
+      bar.className = level < 25 ? 'low' : level > 85 ? 'high' : '';
+      if (onLevel && now - lastReport > 400) { lastReport = now; onLevel(level); }
+      a.raf = requestAnimationFrame(tick);
+    };
+    a.raf = requestAnimationFrame(tick);
+  }
+
+  async function toggleMicTest() {
+    if (testAudio) return stopMicTest();
+    if (listening) { $('#testHint').textContent = 'Stop listening first, then test the microphone.'; return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { $('#testHint').textContent = 'This browser can\'t test the microphone.'; return; }
+    try { testAudio = await openMic(false); }
+    catch { testAudio = null; $('#testHint').textContent = 'Could not open the microphone. Allow it for this site in your browser settings.'; return; }
+    $('#micTest').textContent = 'Stop the test';
+    runMeter(testAudio, $('#testMeter'), (lvl) => {
+      $('#testHint').textContent = lvl < 25 ? 'Too quiet: move the phone closer to the speaker or turn the sound up.'
+        : lvl > 85 ? 'Very loud. That is fine, but if words come out wrong, move the phone back a little.'
+        : 'Good level. Speech at this level should be understood.';
+    });
+  }
+  function stopMicTest() {
+    closeMic(testAudio); testAudio = null;
+    $('#testMeter').hidden = true;
+    $('#micTest').textContent = 'Test the microphone';
+  }
+
+  const applyMode = () => {
+    store.set('mode', mode);
+    document.querySelectorAll('#modeSeg [data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
+    const tv = mode === 'tv';
+    $('#boostField').hidden = !tv;
+    $('#tvTips').hidden = !tv;
+    $('#modeHint').textContent = tv
+      ? 'Switches off the filters that phones use to clean up a voice close by, which can treat TV sound as noise, and boosts quiet sound where this browser allows it.'
+      : 'Best for someone talking to you. The phone filters out background sound.';
+    boost = Math.max(1, Math.min(6, boost));
+    $('#boostRange').value = boost; $('#boostVal').textContent = boost;
+    store.set('boost', boost);
+    const ok = boostSupport();
+    $('#boostRange').disabled = ok === false;
+    $('#boostHint').textContent = ok === true
+      ? 'The boost works in this browser. Raise it if the TV is far away. Lower it if the words come out wrong.'
+      : ok === false
+        ? 'This browser doesn\'t let web apps change how loud the speech recognizer hears (iPhone and Android phones don\'t allow it yet), so the boost can\'t work here. Moving the phone closer is what helps.'
+        : 'Tap Start listening once in Radio or TV mode and the app will check whether this browser allows a boost.';
+  };
+
   // ---------- Speech recognition ----------
   function buildRecognition() {
     const r = new SR();
@@ -452,8 +609,9 @@
     r.interimResults = true;
     r.maxAlternatives = 1;
 
-    r.onstart = () => { lastError = null; status('<span class="dot"></span>Listening in ' + langName() + '…'); };
+    r.onstart = () => { lastError = null; status('<span class="dot"></span>Listening in ' + langName() + (mode === 'tv' ? ' (radio or TV)' : '') + '…'); };
     r.onresult = (e) => {
+      gotResult = true;
       let interim = '', hadFinal = false;
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const res = e.results[i];
@@ -479,6 +637,12 @@
     r.onerror = (e) => {
       lastError = e.error;
       if (e.error === 'no-speech' || e.error === 'aborted') return;
+      // If recognition won't take our boosted sound, go back to its own microphone.
+      if (audio && !gotResult && e.error !== 'network') {
+        closeMic(audio); audio = null; $('#liveMeter').hidden = true; setBoostSupport(false);
+        status('This browser can\'t use the microphone boost. Listening without it…');
+        return;
+      }
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
         stop();
         status('Microphone access was blocked. Allow it for this site in your browser settings, then try again.', true);
@@ -501,7 +665,7 @@
         clearTimeout(restartTimer);
         restartTimer = setTimeout(() => {
           if (!listening) return;
-          try { recognition.start(); } catch { recognition = buildRecognition(); try { recognition.start(); } catch {} }
+          try { startRec(recognition); } catch { recognition = buildRecognition(); try { startRec(recognition); } catch {} }
         }, lastError === 'network' ? 1500 : 250);
       }
     };
@@ -524,10 +688,34 @@
     $('#toggle').classList.add('on');
     // Warm up the on-device translator during the user gesture so its model can download.
     if (srcOf(lang) !== target) getOnDeviceTranslator(srcOf(lang), target);
+    stopMicTest();
+    gotResult = false;
     recognition = buildRecognition();
-    try { recognition.start(); } catch (e) { status('Could not start: ' + e.message, true); stop(); return; }
+    let started = false;
+    if (mode === 'tv' && boostSupport() !== false && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      // Browsers that accept their own audio reject a non-track argument with a
+      // TypeError. Others ignore the argument and simply start with the microphone.
+      let canBoost = false;
+      try { recognition.start({}); started = true; } catch (e) { canBoost = e && e.name === 'TypeError'; }
+      if (started || !canBoost) setBoostSupport(false);
+      if (canBoost) {
+        try {
+          audio = await openMic(true);
+          if (!listening) { closeMic(audio); audio = null; return; }
+          recognition.start(audio.track);
+          started = true;
+          setBoostSupport(true);
+          runMeter(audio, $('#liveMeter'));
+        } catch { closeMic(audio); audio = null; setBoostSupport(false); }
+      }
+      if (!listening) return;
+    }
+    if (!started) {
+      try { recognition.start(); } catch (e) { status('Could not start: ' + e.message, true); stop(); return; }
+    }
     requestWakeLock();
   }
+  const startRec = (r) => audio ? r.start(liveTrack(audio)) : r.start();
 
   function stop() {
     listening = false;
@@ -537,6 +725,8 @@
     $('#toggle').classList.remove('on');
     setInterim('');
     if (recognition) { try { recognition.onend = null; recognition.stop(); } catch {} recognition = null; }
+    closeMic(audio); audio = null;
+    $('#liveMeter').hidden = true;
     releaseWakeLock();
     if (!$('#status').classList.contains('error')) status('');
   }
@@ -606,7 +796,20 @@
   $('#showOrig').addEventListener('change', (e) => { showOrig = e.target.checked; applyOrig(); });
   $('#email').value = email;
   $('#email').addEventListener('change', (e) => { email = e.target.value.trim(); store.set('email', email); });
-  $('#settingsBtn').addEventListener('click', () => { updateEngineInfo(); $('#settings').showModal(); });
+  $('#settingsBtn').addEventListener('click', () => { updateEngineInfo(); applyMode(); $('#settings').showModal(); });
+  $('#settings').addEventListener('close', stopMicTest);
+  document.querySelectorAll('#modeSeg [data-mode]').forEach(b => b.addEventListener('click', () => {
+    if (mode === b.dataset.mode) return;
+    mode = b.dataset.mode; applyMode();
+    if (testAudio) { stopMicTest(); toggleMicTest(); }
+    if (listening) { stop(); start(); }
+  }));
+  $('#boostRange').addEventListener('input', (e) => {
+    boost = Number(e.target.value); applyMode();
+    if (audio) audio.gain.gain.value = boost;
+    if (testAudio && testAudio.useBoost) testAudio.gain.gain.value = boost;
+  });
+  $('#micTest').addEventListener('click', toggleMicTest);
   $('#historyBtn').addEventListener('click', () => { renderHistory(); $('#history').showModal(); });
   document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => b.closest('dialog').close()));
   document.querySelectorAll('dialog').forEach(d => d.addEventListener('click', (e) => { if (e.target === d) d.close(); }));
@@ -614,7 +817,7 @@
   $('#copyBoth').addEventListener('click', (e) => copyText(history.map(h => h.orig + '\n' + h.en).join('\n\n'), e.currentTarget));
   $('#clearHist').addEventListener('click', () => { history = []; store.set('history', history); renderHistory(); });
 
-  applySize(); applyOrig(); applyLang();
+  applySize(); applyOrig(); applyLang(); applyMode();
   if (!SR) status('This browser can\'t do speech recognition. Use Chrome on Android or Safari on iPhone.', true);
 })();
 </script>

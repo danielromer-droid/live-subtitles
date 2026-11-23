@@ -193,6 +193,7 @@
         <li>Put the phone close to the speaker, about an arm's length away. The microphone is at the bottom of the phone, so point the bottom at the sound.</li>
         <li>Turn the volume up a little. Clear voices work much better than voices over loud music.</li>
         <li>If your TV or soundbar has a "clear voice" or "dialogue" setting, turn it on.</li>
+        <li>For the best results, plug a small clip-on microphone (a wired "lavalier" mic) into the phone and put it right next to the TV speaker. The phone then hears the TV as if someone were talking close to it. iPhones need a headphone adapter for this.</li>
         <li>Keep people near the phone quiet. The phone listens to the loudest voice in the room.</li>
         <li>On iPhone, if a "Mic Mode" button shows in Control Center while the app listens, pick "Wide Spectrum".</li>
       </ul>
@@ -249,7 +250,7 @@
   let history = store.get('history', []);
   let mode = store.get('mode', 'person');          // 'person' or 'tv' (radio or TV in the room)
   if (mode !== 'tv') mode = 'person';
-  let boost = store.get('boost', 3);
+  let boost = store.get('boost2', 2);
   let audio = null;      // our own microphone pipeline while listening with a boost
   let testAudio = null;  // microphone pipeline for the Settings test
   let gotResult = false;
@@ -399,7 +400,7 @@
       } catch {}
     }
     const errs = providers.filter(p => p.lastError).map(p => p.name + ': ' + p.lastError).join('; ');
-    $('#engineInfo').textContent = 'App version 7. ' + msg + (errs ? ' Last problems: ' + errs + '.' : '') + (SR ? '' : ' Speech recognition is not supported in this browser.');
+    $('#engineInfo').textContent = 'App version 8. ' + msg + (errs ? ' Last problems: ' + errs + '.' : '') + (SR ? '' : ' Speech recognition is not supported in this browser.');
   }
 
   // ---------- Live (interim) translation ----------
@@ -495,16 +496,23 @@
   // change how loud that is. Newer desktop Chrome lets a page hand it its own
   // audio instead, so there we can switch off the voice filters and boost the sound.
   // Phones (iPhone Safari, Android Chrome) don't allow this yet.
+  // Phones' Chrome shares desktop Chrome's code, so it accepts an audio track
+  // without throwing, but then ignores it and opens the microphone a second
+  // time, which made Radio or TV mode hear worse (v7). Never boost on a phone.
+  const isPhone = (navigator.userAgentData && navigator.userAgentData.mobile) ||
+    /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const boostSupport = () => {
+    if (isPhone) return false;
     const b = store.get('boostSupport', null);
     return b && b.ua === navigator.userAgent ? b.ok : null; // null = not checked yet
   };
   const setBoostSupport = (ok) => { store.set('boostSupport', { ua: navigator.userAgent, ok }); applyMode(); };
 
   async function openMic(forRecognition) {
-    const constraints = mode === 'tv'
-      ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
-      : true;
+    // Keep the normal noise filter and automatic volume: switching them off made
+    // recognition worse. Echo cancelling is only for calls, so it can go.
+    const constraints = mode === 'tv' && !isPhone ? { echoCancellation: false } : true;
     const stream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
     const AC = window.AudioContext || window.webkitAudioContext;
     const ctx = new AC();
@@ -584,14 +592,16 @@
     store.set('mode', mode);
     document.querySelectorAll('#modeSeg [data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
     const tv = mode === 'tv';
-    $('#boostField').hidden = !tv;
+    $('#boostField').hidden = !tv || isPhone;
     $('#tvTips').hidden = !tv;
-    $('#modeHint').textContent = tv
-      ? 'Switches off the filters that phones use to clean up a voice close by, which can treat TV sound as noise, and boosts quiet sound where this browser allows it.'
+    $('#modeHint').textContent = tv && isPhone
+      ? 'On a phone this listens exactly like "A person near me". Phones don\'t let a website make the microphone more sensitive, so use the tips and the microphone test below to find a good spot for the phone.'
+      : tv
+      ? 'Makes quiet sound from a TV or speaker louder before the speech recognizer hears it.'
       : 'Best for someone talking to you. The phone filters out background sound.';
     boost = Math.max(1, Math.min(6, boost));
     $('#boostRange').value = boost; $('#boostVal').textContent = boost;
-    store.set('boost', boost);
+    store.set('boost2', boost);
     const ok = boostSupport();
     $('#boostRange').disabled = ok === false;
     $('#boostHint').textContent = ok === true

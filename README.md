@@ -29,7 +29,7 @@ The first time you tap **Start listening**, allow microphone access.
 2. Tap **Start listening** and hold the phone near the speaker, TV or person talking.
 3. Subtitles appear while the person is still talking (in light grey) and settle into white when the sentence finishes. The original words show underneath.
 
-For a radio or TV in the room, open Settings and choose **Radio or TV** under "What are you listening to?". **Test the microphone** shows a level bar so you can find a good spot for the phone, and the tips underneath explain where to put it. On desktop Chrome this mode also turns off the voice filters and adds a **Microphone boost** slider. iPhone and Android phones don't let a web page change what the speech recognizer hears yet, so there the placement of the phone is what makes the difference.
+For a radio or TV in the room, open Settings and choose **Radio or TV** under "What are you listening to?". **Test the microphone** shows a level bar so you can find a good spot for the phone, and the tips underneath explain where to put it. On desktop Chrome this mode also adds a **Microphone boost** slider. iPhone and Android phones don't let a web page change what the speech recognizer hears, so on a phone this mode listens exactly like "A person near me" and the placement of the phone (or a small clip-on microphone next to the TV speaker) is what makes the difference.
 
 Use **A− / A+** (or Settings) to change the subtitle size, and **⌫** to erase the text on screen. **History** keeps what was said on this phone, with buttons to copy it.
 

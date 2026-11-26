@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Live Subtitles</title>
-<meta name="description" content="Live translated subtitles between English, German, Spanish, Catalan, Italian and French.">
+<meta name="description" content="Live translated subtitles between English, French, German, Spanish, Catalan, Italian and Chinese.">
 <meta name="theme-color" content="#0f1115">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -197,6 +197,7 @@
     { code: 'es', rec: 'es-ES', name: 'Spanish', native: 'Español' },
     { code: 'ca', rec: 'ca-ES', name: 'Catalan', native: 'Català' },
     { code: 'it', rec: 'it-IT', name: 'Italian', native: 'Italiano' },
+    { code: 'zh-CN', rec: 'zh-CN', name: 'Chinese', native: '中文 (普通话)' },
   ];
   const recOf = (code) => LANGS.find(l => l.code === code).rec;
   let lang = store.get('lang', 'de-DE');           // speech recognition language
@@ -235,7 +236,7 @@
     $('#showOrig').checked = showOrig;
     store.set('showOrig', showOrig);
   };
-  const srcOf = (l) => l.slice(0, 2);
+  const srcOf = (l) => (LANGS.find(x => x.rec === l) || {}).code || l.slice(0, 2);
   const fill = (sel) => { sel.innerHTML = LANGS.map(l => '<option value="' + l.code + '">' + l.native + '</option>').join(''); };
   fill($('#fromSel')); fill($('#toSel'));
   const applyLang = () => {
@@ -353,7 +354,7 @@
       } catch {}
     }
     const errs = providers.filter(p => p.lastError).map(p => p.name + ': ' + p.lastError).join('; ');
-    $('#engineInfo').textContent = 'App version 9. ' + msg + (errs ? ' Last problems: ' + errs + '.' : '') + (SR ? '' : ' Speech recognition is not supported in this browser.');
+    $('#engineInfo').textContent = 'App version 10. ' + msg + (errs ? ' Last problems: ' + errs + '.' : '') + (SR ? '' : ' Speech recognition is not supported in this browser.');
   }
 
   // ---------- Live (interim) translation ----------
@@ -388,11 +389,15 @@
   }
 
   // Long speech without a pause: the phone may not finish a "sentence" for a
-  // long time. Every CHUNK_WORDS words, lock in the older words as a subtitle
-  // line, keeping the last few words open because recognition still revises them.
+  // long time. Every CHUNK_WORDS words (or CHUNK_CHARS characters for Chinese),
+  // lock in the older part as a subtitle line, keeping the tail open because
+  // recognition still revises it.
   const CHUNK_WORDS = 12, KEEP_OPEN = 4;
-  let committedWords = 0, fullInterim = '';
-  const words = (t) => t.trim().split(/\s+/).filter(Boolean);
+  const CHUNK_CHARS = 24, KEEP_OPEN_CHARS = 8;
+  let committedUnits = 0, fullInterim = '';
+  const isZh = () => srcOf(lang).startsWith('zh');
+  const units = (t) => isZh() ? Array.from(t.trim()) : t.trim().split(/\s+/).filter(Boolean);
+  const joinUnits = (arr) => isZh() ? arr.join('') : arr.join(' ');
 
   // ---------- Subtitles ----------
   // Lines are translated in parallel but kept in spoken order.
@@ -458,23 +463,25 @@
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const res = e.results[i];
         if (res.isFinal) {
-          // Skip the words already shown as chunks.
-          const rest = words(res[0].transcript).slice(committedWords).join(' ');
-          committedWords = 0;
+          // Skip the words/characters already shown as chunks.
+          const rest = joinUnits(units(res[0].transcript).slice(committedUnits));
+          committedUnits = 0;
           if (rest) addFinal(rest);
           hadFinal = true;
         } else interim += res[0].transcript;
       }
       if (hadFinal) setInterim('');
       fullInterim = interim;
-      let w = words(interim);
-      if (w.length - committedWords >= CHUNK_WORDS + KEEP_OPEN) {
-        const upto = w.length - KEEP_OPEN;
+      const chunkLen = isZh() ? CHUNK_CHARS : CHUNK_WORDS;
+      const keepLen = isZh() ? KEEP_OPEN_CHARS : KEEP_OPEN;
+      let u = units(interim);
+      if (u.length - committedUnits >= chunkLen + keepLen) {
+        const upto = u.length - keepLen;
         setInterim('');
-        addFinal(w.slice(committedWords, upto).join(' '));
-        committedWords = upto;
+        addFinal(joinUnits(u.slice(committedUnits, upto)));
+        committedUnits = upto;
       }
-      setInterim(w.slice(committedWords).join(' '));
+      setInterim(joinUnits(u.slice(committedUnits)));
     };
     r.onerror = (e) => {
       lastError = e.error;
@@ -494,7 +501,7 @@
     r.onend = () => {
       // Some phones stop without finishing the last sentence: keep it.
       if (interimText) addFinal(interimText);
-      committedWords = 0;
+      committedUnits = 0;
       setInterim('');
       // Browsers stop after silence or a time limit, so keep restarting while listening.
       if (listening) {
@@ -531,7 +538,7 @@
 
   function stop() {
     listening = false;
-    committedWords = 0;
+    committedUnits = 0;
     clearTimeout(restartTimer);
     $('#toggle').textContent = 'Start listening';
     $('#toggle').classList.remove('on');
@@ -596,7 +603,7 @@
   $('#clearScreen').addEventListener('click', () => {
     $('#lines').innerHTML = '';
     // Words already heard stay erased even when the phone finishes the sentence.
-    committedWords = listening ? words(fullInterim).length : 0;
+    committedUnits = listening ? units(fullInterim).length : 0;
     setInterim('');
     $('#placeholder').style.display = listening ? 'none' : '';
   });

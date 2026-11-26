@@ -1,6 +1,6 @@
 # Live Subtitles
 
-A phone web app that listens through the microphone and shows live translated subtitles. Pick the language being spoken and the language you want to read, in any direction between English, French, German, Spanish, Catalan and Italian.
+A phone web app that listens through the microphone and shows live translated subtitles. Pick the language being spoken and the language you want to read, in any direction between English, French, German, Spanish, Catalan, Italian and Chinese (Mandarin).
 
 - Works on Android (Chrome) and iPhone (Safari)
 - Add it to your home screen and it opens like a normal app

@@ -41,7 +41,8 @@
     display: flex; align-items: center; gap: 8px;
     padding: 10px 16px; border-bottom: 1px solid var(--line);
   }
-  header h1 { font-size: 17px; margin: 0; flex: 1; font-weight: 650; letter-spacing: .2px; }
+  header h1 { font-size: 17px; margin: 0; flex: 1; font-weight: 650; letter-spacing: .2px; display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .logo { width: 34px; height: 34px; flex: none; fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .icon-btn {
     background: none; border: 1px solid var(--line); color: var(--text);
     border-radius: 10px; height: 38px; min-width: 38px; padding: 0 10px; font-size: 15px; cursor: pointer;
@@ -121,7 +122,7 @@
 </head>
 <body>
 <header>
-  <h1>Live Subtitles</h1>
+  <h1><svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 9.5h3l4-3.5v12l-4-3.5h-3z"/><path d="M13.5 8.5h8M13.5 12h8M13.5 15.5h5.5"/></svg>Live Subtitles</h1>
   <button class="icon-btn" id="historyBtn" aria-label="History">History</button>
   <button class="icon-btn" id="settingsBtn" aria-label="Settings">⚙︎</button>
 </header>
@@ -357,7 +358,7 @@
       } catch {}
     }
     const errs = providers.filter(p => p.lastError).map(p => p.name + ': ' + p.lastError).join('; ');
-    $('#engineInfo').textContent = 'App version 11. ' + msg + (errs ? ' Last problems: ' + errs + '.' : '') + (SR ? '' : ' Speech recognition is not supported in this browser.');
+    $('#engineInfo').textContent = 'App version 12. ' + msg + (errs ? ' Last problems: ' + errs + '.' : '') + (SR ? '' : ' Speech recognition is not supported in this browser.');
   }
 
   // ---------- Live (interim) translation ----------
